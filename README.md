@@ -10,8 +10,8 @@ Jellyfin's API. The plain file player (`SimplePlayer.vcxproj`) is still here, un
 ## Status
 
 **Work in progress, not yet run on a console.** The Jellyfin side (sign-in, browsing, play
-decisions, progress reporting) is written and tested natively on a Mac against a real server
-and a mock one (see *Testing without a console*). The console build has not been compiled yet;
+decisions, progress reporting) is written and exercised natively on a Mac against a mock
+server (see *Testing without a console*); a run against a real Jellyfin is next. The console build has not been compiled yet;
 expect that step to shake out a few errors. Nothing here is affiliated with Jellyfin or Microsoft.
 
 ## What it does
@@ -41,7 +41,8 @@ The app only writes `auth.ini`, `settings.ini` and `jellyfin360.log` next to `de
 Delete `auth.ini` to sign out.
 
 Needs Jellyfin **10.9 or newer**. Works with DashLaunch liveblock; no Xbox Live or stealth
-server is needed.
+server is needed. Use a plain `http://` address on your home network: TLS decryption on the
+360's CPU tops out near 8 Mbit/s, which is below many direct-play files.
 
 ## Controls
 
