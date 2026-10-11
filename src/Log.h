@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-// Timestamped log to the debug output and game:\plexlog.txt.
+// Timestamped log to the debug output and game:\jellyfin360.log.
 namespace Log
 {
     void Open( const char* path );

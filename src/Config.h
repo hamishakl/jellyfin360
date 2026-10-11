@@ -1,16 +1,18 @@
 #pragma once
 #include <string>
 
-// Optional settings from game:\plex.ini (key=value lines, # comments).
+// Settings from game:\jellyfin.ini (key=value lines, # comments). 'server' is required.
 struct Config
 {
-    std::string connection;   // auto (default), local, remote or relay - forces a connection type
-    std::string serverName;   // pick this server if the account has several; empty = first owned
-    std::string autoplay;     // testing: metadata id to start playing right after connecting
+    std::string server;       // http://192.168.1.10:8096 or https://jellyfin.example.com
+    std::string username;     // optional: sign in with a password instead of Quick Connect
+    std::string password;
+    std::string autoplay;     // testing: item id to start playing right after connecting
     int         threads;      // video decode threads, 1-4 (default 4)
-    int         directMax;    // tallest video played without Plex converting it (default 720)
-    int         quality;      // height Plex converts to when a file can't be played directly (480/576/720)
-    int         kbps;         // bitrate of those conversions, and the most a file may have to play directly
+    int         directMax;    // tallest video played without the server converting it (default 720)
+    int         directKbps;   // heaviest video played without converting (default 8000)
+    int         quality;      // height the server converts to when a file can't be played directly (480/576/720)
+    int         kbps;         // bitrate of those conversions
     int         testSeek;     // testing: seek by this many seconds every 12 s (3 times)
     bool        testOsd;      // testing: keep the player bar visible with a fake scrub target
     std::string testNav;      // testing: keys pressed one per 1.5 s (U D L R A B X Y), e.g. "R A"
@@ -20,7 +22,7 @@ struct Config
     int         testHang;     // testing: freeze the main loop this many seconds after start
     std::string logTo;        // debugging: ip:port that receives log lines over UDP
 
-    Config() : connection( "auto" ), threads( 4 ), directMax( 720 ), quality( 720 ), kbps( 4000 ), testSeek( 0 ),
+    Config() : threads( 4 ), directMax( 720 ), directKbps( 8000 ), quality( 720 ), kbps( 4000 ), testSeek( 0 ),
                testOsd( false ), autoplayStart( 0 ), benchmark( 0 ), testCrash( 0 ), testHang( 0 ) {}
 
     // A missing file is fine: defaults apply.
@@ -30,8 +32,11 @@ struct Config
 // Sign-in state saved on the console in game:\auth.ini.
 struct AuthStore
 {
-    std::string clientId;     // random, generated on first run; identifies this console to Plex
-    std::string token;        // plex.tv account token from the link-code sign-in
+    std::string deviceId;     // random, generated on first run; identifies this console to the server
+    std::string server;       // the server the token belongs to
+    std::string token;        // access token from Quick Connect or the password sign-in
+    std::string userId;
+    std::string username;
 
     bool Load( const char* path );
     bool Save( const char* path ) const;

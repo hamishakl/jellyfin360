@@ -5,15 +5,15 @@
 #include <string>
 #include <vector>
 #include <functional>
-#include "PlexApi.h"
-#include "PlexTv.h"
+#include "JellyfinApi.h"
+#include "JellyfinAuth.h"
 #include "Tasks.h"
 #include "ImageCache.h"
 
 // User-adjustable settings, saved to game:\settings.ini.
 struct UserSettings
 {
-    int  quality;       // height Plex converts to: 480, 576 or 720
+    int  quality;       // height the server converts to: 480, 576 or 720
     int  kbps;          // conversion bitrate, also the direct-play limit
     int  directMax;     // tallest file played without conversion
     bool stats;         // stats-for-nerds overlay during playback
@@ -27,9 +27,9 @@ struct UserSettings
 
 struct BrowserHost
 {
-    std::function<void( const Plex::Item& item, double startSeconds )> play;
+    std::function<void( const Jellyfin::Item& item, double startSeconds )> play;
     std::function<void()>                                             signOut;
-    std::function<void( const std::string& token, const std::wstring& name )> switchUser;
+    std::function<void( const JellyfinAuth::Session& session )>       switchUser;
     std::function<void()>                                             settingsChanged;
     std::function<void()>                                             exitApp;
 };
@@ -43,9 +43,9 @@ public:
                   TaskQueue* tasks, ImageCache* images, UserSettings* settings, const BrowserHost& host );
 
     // Called once connected (and again after switching user).
-    void SetSession( Plex::Client* client, const std::string& clientId, const std::string& accountToken,
+    void SetSession( Jellyfin::Client* client, const std::string& deviceId, const std::string& accountToken,
                      const std::wstring& userName, const std::wstring& serverLabel,
-                     const std::vector<Plex::Item>& sections );
+                     const std::vector<Jellyfin::Item>& sections );
 
     void Update( Pad* pad );
     void Render();
@@ -66,25 +66,25 @@ private:
         std::wstring             title;
 
         // HOME
-        std::vector<Plex::Hub>   hubs;
+        std::vector<Jellyfin::Hub>   hubs;
         int                      row, col;
         std::vector<int>         rowScroll;
 
         // LIBRARY / SEASON / USERS: a flat list of items
         std::string              path;
-        std::vector<Plex::Item>  items;
+        std::vector<Jellyfin::Item>  items;
         int                      total;
         bool                     loadingMore;
         int                      sel, scroll;
 
         // DETAILS
-        Plex::Item               item;        // the movie/show itself
-        std::vector<Plex::Item>  children;    // seasons of a show
+        Jellyfin::Item               item;        // the movie/show itself
+        std::vector<Jellyfin::Item>  children;    // seasons of a show
         int                      button;      // focused button / season
 
         // USERS / PIN
-        std::vector<PlexTv::HomeUser> users;
-        PlexTv::HomeUser         pinUser;
+        std::vector<JellyfinAuth::User> users;
+        JellyfinAuth::User       pinUser;
         int                      digits[4];
         int                      digitPos;
 
@@ -100,7 +100,7 @@ private:
     void     Pop();
     Screen&  Top() { return m_stack.back(); }
     Screen*  FindScreen( int id );
-    void     OpenItem( const Plex::Item& item );
+    void     OpenItem( const Jellyfin::Item& item );
     void     OpenSection( int index );
 
     // loading
@@ -131,7 +131,7 @@ private:
     void     RenderUsers( Screen& s );
     void     RenderPin( Screen& s );
     void     RenderLoading( Screen& s );
-    void     Poster( const Plex::Item& item, float x, float y, float w, float h, bool focused, bool wide = false );
+    void     Poster( const Jellyfin::Item& item, float x, float y, float w, float h, bool focused, bool wide = false );
     void     Text( Font* font, float x, float y, DWORD color, const std::wstring& s, float scale = 1.0f,
                    DWORD flags = 0, float maxWidth = 0 );
     int      WrapText( Font* font, float x, float y, float width, int maxLines, DWORD color,
@@ -147,12 +147,12 @@ private:
     UserSettings*            m_settings;
     BrowserHost              m_host;
 
-    Plex::Client*            m_client;
-    std::string              m_clientId;
+    Jellyfin::Client*            m_client;
+    std::string              m_deviceId;
     std::string              m_accountToken;
     std::wstring             m_userName;
     std::wstring             m_serverLabel;
-    std::vector<Plex::Item>  m_sections;
+    std::vector<Jellyfin::Item>  m_sections;
 
     std::vector<Screen>      m_stack;
     int                      m_nextId;

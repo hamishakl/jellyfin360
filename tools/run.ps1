@@ -1,4 +1,4 @@
-# Copies the build to the console (hdd:\PlexClient), launches it, and optionally
+# Copies the build to the console (hdd:\Jellyfin360), launches it, and optionally
 # takes a screenshot and pulls back the log.
 #   .\tools\run.ps1                         -> deploy Release + launch
 #   .\tools\run.ps1 -Screenshot -Wait 8     -> also capture screenshots\latest.png after 8 s
@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $xedk = [Environment]::GetEnvironmentVariable('XEDK', 'Machine')
 $bin = "$xedk\bin\win32"
-$remote = 'hdd:\PlexClient'
+$remote = 'hdd:\Jellyfin360'
 $out = "$root\build\$Configuration"
 $console = (Get-ItemProperty 'HKCU:\Software\Microsoft\XenonSDK').XboxName
 
@@ -67,9 +67,9 @@ function Invoke-Xb([string]$tool, [string[]]$arguments) {
 Test-Hr ([Xbdm]::DmSetXboxName($console)) "Connect to $console"
 
 if (-not $NoDeploy) {
-    if (-not (Test-Path "$root\plex.ini")) { throw "plex.ini missing - copy plex.ini.example to plex.ini" }
+    if (-not (Test-Path "$root\jellyfin.ini")) { throw "jellyfin.ini missing - copy jellyfin.ini.example to jellyfin.ini" }
     Send-Dir "$out\Media" "$remote\Media"
-    Send-File "$root\plex.ini" "$remote\plex.ini"
+    Send-File "$root\jellyfin.ini" "$remote\jellyfin.ini"
     Send-File "$out\default.xex" "$remote\default.xex"
     Write-Host "Deployed to $console $remote"
     Invoke-Xb xbreboot @("$remote\default.xex") | Out-Null
@@ -92,8 +92,8 @@ if ($Screenshot) {
     Write-Host "Screenshot: screenshots\latest.png"
 
     try {
-        Invoke-Xb xbcp @('/y', '/q', "$remote\plexlog.txt", "$root\screenshots\plexlog.txt") | Out-Null
-        Write-Host "--- plexlog.txt"
-        Get-Content "$root\screenshots\plexlog.txt"
+        Invoke-Xb xbcp @('/y', '/q', "$remote\jellyfin360.log", "$root\screenshots\jellyfin360.log") | Out-Null
+        Write-Host "--- jellyfin360.log"
+        Get-Content "$root\screenshots\jellyfin360.log"
     } catch { Write-Host "(no log on console yet)" }
 }

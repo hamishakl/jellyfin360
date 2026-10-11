@@ -69,9 +69,10 @@ IDirect3DTexture9* ImageCache::Get( const std::string& thumb, int w, int h )
     e.bytes = 0;
     m_entries[key] = e;
 
+    // Jellyfin scales and crops to fill the box; JPEG because D3DX can't read WebP.
     char query[96];
-    sprintf_s( query, "&width=%d&height=%d&minSize=1&upscale=1", w, h );
-    std::string url = m_base + "/photo/:/transcode?url=" + Http::Escape( thumb ) + query;
+    sprintf_s( query, "fillWidth=%d&fillHeight=%d&quality=85&format=Jpg", w, h );
+    std::string url = m_base + thumb + ( thumb.find( '?' ) == std::string::npos ? "?" : "&" ) + query;
 
     Download* d = new Download;
     d->key = key;

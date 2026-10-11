@@ -13,11 +13,10 @@ public:
 
     void Startup( IDirect3DDevice9* device );
 
-    // Base URL of the server's photo transcoder and the headers (token) it needs.
+    // Base URL of the server and the headers (token) it needs.
     void SetServer( const std::string& base, const std::string& headers );
 
-    // thumb: the item's thumb/art path (e.g. /library/metadata/12/thumb/1690000000).
-    // The server scales it to w x h.
+    // thumb: the item's image path (e.g. /Items/<id>/Images/Primary?tag=...). The server scales it to w x h.
     IDirect3DTexture9* Get( const std::string& thumb, int w, int h );
 
     // Render thread, once per frame: turns finished downloads into textures.

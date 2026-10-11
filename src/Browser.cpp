@@ -13,7 +13,7 @@ namespace
     const DWORD C_SIDEBAR   = 0xF0101010;
     const DWORD C_PANEL     = 0xFF1F1F1F;
     const DWORD C_PLACEHOLD = 0xFF2B2B2B;
-    const DWORD C_ACCENT    = 0xFFE5A00D;   // Plex orange
+    const DWORD C_ACCENT    = 0xFF00A4DC;   // Jellyfin blue
     const DWORD C_TEXT      = 0xFFF0F0F0;
     const DWORD C_DIM       = 0xFF9A9A9A;
     const DWORD C_FAINT     = 0xFF606060;
@@ -43,7 +43,7 @@ namespace
 
     template<typename T> T Clamp( T v, T lo, T hi ) { return v < lo ? lo : ( v > hi ? hi : v ); }
 
-    std::string PosterOf( const Plex::Item& it )
+    std::string PosterOf( const Jellyfin::Item& it )
     {
         if( it.type == "episode" && !it.grandparentThumb.empty() )
             return it.grandparentThumb;
@@ -68,7 +68,7 @@ namespace
         return out;
     }
 
-    std::wstring TitleOf( const Plex::Item& it )
+    std::wstring TitleOf( const Jellyfin::Item& it )
     {
         return it.type == "episode" && !it.grandparentTitle.empty() ? it.grandparentTitle : it.title;
     }
@@ -138,12 +138,12 @@ void Browser::Startup( IDirect3DDevice9* device, Font* font, Font* titleFont, co
     m_host = host;
 }
 
-void Browser::SetSession( Plex::Client* client, const std::string& clientId, const std::string& accountToken,
+void Browser::SetSession( Jellyfin::Client* client, const std::string& deviceId, const std::string& accountToken,
                           const std::wstring& userName, const std::wstring& serverLabel,
-                          const std::vector<Plex::Item>& sections )
+                          const std::vector<Jellyfin::Item>& sections )
 {
     m_client = client;
-    m_clientId = clientId;
+    m_deviceId = deviceId;
     m_accountToken = accountToken;
     m_userName = userName;
     m_serverLabel = serverLabel;
@@ -211,14 +211,14 @@ void Browser::OpenSection( int index )
     Push( LIBRARY );
     Screen& s = Top();
     s.title = m_sections[index].title;
-    s.path = "/library/sections/" + m_sections[index].sectionId + "/all?sort=titleSort";
+    s.path = m_sections[index].key;
     LoadLibrary( s, false );
 }
 
-void Browser::OpenItem( const Plex::Item& source )
+void Browser::OpenItem( const Jellyfin::Item& source )
 {
     // Copy: 'source' may live in the screen stack, which Push() can reallocate.
-    const Plex::Item item = source;
+    const Jellyfin::Item item = source;
     if( item.type == "movie" || item.type == "show" )
     {
         Push( DETAILS );
@@ -267,8 +267,8 @@ void Browser::LoadHome( Screen& s )
 {
     s.loading = s.hubs.empty();
     int id = s.id;
-    Plex::Client client = *m_client;
-    std::vector<Plex::Hub>* hubs = new std::vector<Plex::Hub>;
+    Jellyfin::Client client = *m_client;
+    std::vector<Jellyfin::Hub>* hubs = new std::vector<Jellyfin::Hub>;
     std::string* error = new std::string;
     Browser* self = this;
     m_tasks->Post(
@@ -306,8 +306,8 @@ void Browser::LoadLibrary( Screen& s, bool more )
     int id = s.id;
     int start = more ? (int)s.items.size() : 0;
     std::string path = s.path;
-    Plex::Client client = *m_client;
-    Plex::Result* r = new Plex::Result;
+    Jellyfin::Client client = *m_client;
+    Jellyfin::Result* r = new Jellyfin::Result;
     Browser* self = this;
     m_tasks->Post(
         [client, path, start, r]() mutable { *r = client.Browse( path, start, LIBRARY_PAGE ); },
@@ -336,18 +336,18 @@ void Browser::LoadLibrary( Screen& s, bool more )
 void Browser::LoadDetails( Screen& s )
 {
     int id = s.id;
-    std::string ratingKey = s.item.ratingKey;
+    Jellyfin::Item item = s.item;
     bool isShow = s.item.type == "show";
-    Plex::Client client = *m_client;
-    Plex::Result* details = new Plex::Result;
-    Plex::Result* children = new Plex::Result;
+    Jellyfin::Client client = *m_client;
+    Jellyfin::Result* details = new Jellyfin::Result;
+    Jellyfin::Result* children = new Jellyfin::Result;
     Browser* self = this;
     m_tasks->Post(
-        [client, ratingKey, isShow, details, children]() mutable
+        [client, item, isShow, details, children]() mutable
         {
-            *details = client.Details( ratingKey );
+            *details = client.Details( item.id );
             if( isShow )
-                *children = client.Browse( "/library/metadata/" + ratingKey + "/children" );
+                *children = client.Children( details->ok && !details->items.empty() ? details->items[0] : item );
         },
         [self, id, details, children]()
         {
@@ -381,12 +381,12 @@ void Browser::LoadSeason( Screen& s )
 {
     s.loading = s.items.empty();
     int id = s.id;
-    std::string ratingKey = s.item.ratingKey;
-    Plex::Client client = *m_client;
-    Plex::Result* r = new Plex::Result;
+    Jellyfin::Item item = s.item;
+    Jellyfin::Client client = *m_client;
+    Jellyfin::Result* r = new Jellyfin::Result;
     Browser* self = this;
     m_tasks->Post(
-        [client, ratingKey, r]() mutable { *r = client.Browse( "/library/metadata/" + ratingKey + "/children" ); },
+        [client, item, r]() mutable { *r = client.Children( item ); },
         [self, id, r]()
         {
             Screen* s = self->FindScreen( id );
@@ -418,19 +418,19 @@ void Browser::LoadUsers( Screen& s )
     s.loading = true;
     s.title = L"Switch user";
     int id = s.id;
-    std::string clientId = m_clientId, token = m_accountToken;
-    std::vector<PlexTv::HomeUser>* users = new std::vector<PlexTv::HomeUser>;
+    std::string base = m_client->Base(), deviceId = m_deviceId;
+    std::vector<JellyfinAuth::User>* users = new std::vector<JellyfinAuth::User>;
     std::string* error = new std::string;
     Browser* self = this;
     m_tasks->Post(
-        [clientId, token, users, error]() { PlexTv::HomeUsers( clientId, token, *users, *error ); },
+        [base, deviceId, users, error]() { JellyfinAuth::PublicUsers( base, deviceId, *users, *error ); },
         [self, id, users, error]()
         {
             Screen* s = self->FindScreen( id );
             if( s )
             {
                 s->loading = false;
-                s->error = users->empty() && error->empty() ? "This account has no other Plex Home users" : *error;
+                s->error = users->empty() && error->empty() ? "The server shows no users on its sign-in page" : *error;
                 s->users.swap( *users );
             }
             delete users;
@@ -620,7 +620,7 @@ void Browser::UpdateGrid( Screen& s, WORD pressed )
 
 void Browser::UpdateDetails( Screen& s, WORD pressed )
 {
-    const Plex::Item& it = s.item;
+    const Jellyfin::Item& it = s.item;
     if( it.type == "show" )
     {
         int n = (int)s.children.size();
@@ -647,8 +647,8 @@ void Browser::UpdateDetails( Screen& s, WORD pressed )
         else
         {
             bool watched = !it.Watched();
-            Plex::Client client = *m_client;
-            std::string key = it.ratingKey;
+            Jellyfin::Client client = *m_client;
+            std::string key = it.id;
             int id = s.id;
             Browser* self = this;
             m_tasks->Post( [client, key, watched]() mutable { client.SetWatched( key, watched ); },
@@ -673,7 +673,7 @@ void Browser::UpdateSeason( Screen& s, WORD pressed )
     if( pressed & XINPUT_GAMEPAD_DPAD_UP )   s.sel = Clamp( s.sel - 1, 0, count - 1 );
     if( pressed & XINPUT_GAMEPAD_A )
     {
-        const Plex::Item& ep = s.items[s.sel];
+        const Jellyfin::Item& ep = s.items[s.sel];
         m_host.play( ep, ep.viewOffsetMs / 1000.0 );
     }
     if( pressed & XINPUT_GAMEPAD_X )
@@ -756,12 +756,13 @@ void Browser::UpdateUsers( Screen& s, WORD pressed )
     if( pressed & XINPUT_GAMEPAD_DPAD_LEFT )  s.sel = Clamp( s.sel - 1, 0, count - 1 );
     if( pressed & XINPUT_GAMEPAD_A )
     {
-        PlexTv::HomeUser u = s.users[s.sel];   // copy: Push() may move the stack
-        if( u.isProtected )
+        JellyfinAuth::User u = s.users[s.sel];   // copy: Push() may move the stack
+        if( u.hasPassword )
         {
+            // Only a 4-digit numeric password can be typed with the pad.
             Push( PIN );
             Top().pinUser = u;
-            Top().title = L"Enter PIN for " + u.title;
+            Top().title = L"Enter the 4-digit password for " + u.name;
             return;
         }
         Screen pin;
@@ -790,24 +791,25 @@ void Browser::UpdatePin( Screen& s, WORD pressed )
         return;
 
     char pin[8] = "";
-    if( s.pinUser.isProtected )
+    if( s.pinUser.hasPassword )
         sprintf_s( pin, "%d%d%d%d", s.digits[0], s.digits[1], s.digits[2], s.digits[3] );
-    std::string clientId = m_clientId, token = m_accountToken, uuid = s.pinUser.uuid, pinStr = pin;
-    std::wstring name = s.pinUser.title;
-    std::string* newToken = new std::string;
+    std::string base = m_client->Base(), deviceId = m_deviceId, pinStr = pin;
+    std::wstring name = s.pinUser.name;
+    std::string user( name.begin(), name.end() );
+    JellyfinAuth::Session* session = new JellyfinAuth::Session;
     std::string* error = new std::string;
     Browser* self = this;
     Toast( L"Switching to " + name + L"..." );
     m_tasks->Post(
-        [clientId, token, uuid, pinStr, newToken, error]()
-        { PlexTv::SwitchUser( clientId, token, uuid, pinStr, *newToken, *error ); },
-        [self, newToken, error, name]()
+        [base, deviceId, user, pinStr, session, error]()
+        { JellyfinAuth::Login( base, deviceId, user, pinStr, *session, *error ); },
+        [self, session, error]()
         {
-            if( newToken->empty() )
+            if( session->token.empty() )
                 self->Toast( L"Could not switch: " + Widen( *error ) );
             else
-                self->m_host.switchUser( *newToken, name );
-            delete newToken;
+                self->m_host.switchUser( *session );
+            delete session;
             delete error;
         },
         0 );
@@ -891,7 +893,7 @@ std::wstring Browser::Duration( int ms ) const
     return buf;
 }
 
-void Browser::Poster( const Plex::Item& it, float x, float y, float w, float h, bool focused, bool wide )
+void Browser::Poster( const Jellyfin::Item& it, float x, float y, float w, float h, bool focused, bool wide )
 {
     std::string thumb = wide ? it.thumb : PosterOf( it );
     IDirect3DTexture9* tex = m_images->Get( thumb, (int)w, (int)h );
@@ -1032,7 +1034,7 @@ void Browser::RenderHome( Screen& s )
     float y = TOP_Y;
     for( int r = first; r < (int)s.hubs.size() && y < 700; ++r )
     {
-        const Plex::Hub& hub = s.hubs[r];
+        const Jellyfin::Hub& hub = s.hubs[r];
         Text( m_titleFont, CONTENT_X, y, r == s.row && !m_sidebarFocus ? C_TEXT : C_DIM, hub.title );
         float py = y + 40;
         int scroll = s.rowScroll[r];
@@ -1040,8 +1042,8 @@ void Browser::RenderHome( Screen& s )
         {
             float px = CONTENT_X + ( c - scroll ) * ( HUB_POSTER_W + HUB_GAP );
             if( px > 1280 )
-                break;   // the next poster may peek in at the edge, like Plex
-            const Plex::Item& it = hub.items[c];
+                break;   // the next poster may peek in at the edge, like the Plex app
+            const Jellyfin::Item& it = hub.items[c];
             bool focused = !m_sidebarFocus && r == s.row && c == s.col;
             Poster( it, px, py, HUB_POSTER_W, HUB_POSTER_H, focused );
             if( focused )
@@ -1077,7 +1079,7 @@ void Browser::RenderGrid( Screen& s )
         float px = CONTENT_X + ( i % GRID_COLS ) * cellW;
         float py = top + row * GRID_ROW_H;
         bool focused = !m_sidebarFocus && i == s.sel;
-        const Plex::Item& it = s.items[i];
+        const Jellyfin::Item& it = s.items[i];
         Poster( it, px, py, GRID_POSTER_W, GRID_POSTER_H, focused );
         Text( m_font, px, py + GRID_POSTER_H + 8, focused ? C_TEXT : C_DIM, it.title, 0.8f, 0, GRID_POSTER_W );
         if( focused )
@@ -1087,7 +1089,7 @@ void Browser::RenderGrid( Screen& s )
 
 void Browser::RenderDetails( Screen& s )
 {
-    const Plex::Item& it = s.item;
+    const Jellyfin::Item& it = s.item;
     float px = 100, py = 90, pw = 260, ph = 390;
     Poster( it, px, py, pw, ph, false );
 
@@ -1168,7 +1170,7 @@ void Browser::RenderDetails( Screen& s )
 
 void Browser::RenderSeason( Screen& s )
 {
-    const Plex::Item& season = s.item;
+    const Jellyfin::Item& season = s.item;
     Poster( season, 100, 90, 200, 300, false );
     Text( m_titleFont, 100, 410, C_TEXT, season.parentTitle, 1.0f, 0, 220 );
     Text( m_font, 100, 445, C_DIM, season.title, 1.0f, 0, 220 );
@@ -1186,7 +1188,7 @@ void Browser::RenderSeason( Screen& s )
         float y = 70 + ( i - first ) * rowH;
         if( y > 640 )
             break;
-        const Plex::Item& ep = s.items[i];
+        const Jellyfin::Item& ep = s.items[i];
         bool focused = i == s.sel;
         if( focused )
             Draw::Rect( x - 14, y - 10, CONTENT_R + 10, y + thumbH + 14, 0xC0262626 );
@@ -1216,7 +1218,7 @@ void Browser::RenderSettings( Screen& s )
         switch( i )
         {
         case SET_ACCOUNT:    label = L"Signed in as";  value = m_userName; break;
-        case SET_SWITCH:     label = L"Switch Plex Home user"; break;
+        case SET_SWITCH:     label = L"Switch user"; break;
         case SET_SIGNOUT:    label = L"Sign out"; break;
         case SET_SERVER:     label = L"Server";        value = m_serverLabel; break;
         case SET_QUALITY:
@@ -1244,7 +1246,7 @@ void Browser::RenderSettings( Screen& s )
         Text( m_titleFont, CONTENT_R - 10, y, focused ? C_ACCENT : C_DIM, value, 0.95f, FONT_RIGHT, 500 );
     }
     Text( m_font, CONTENT_X, 660, C_FAINT,
-          L"Videos above the direct-play limit or bitrate are converted by your Plex server.", 0.8f );
+          L"Videos above the direct-play limit or bitrate are converted by your Jellyfin server.", 0.8f );
 }
 
 void Browser::RenderUsers( Screen& s )
@@ -1272,10 +1274,10 @@ void Browser::RenderUsers( Screen& s )
             Draw::Image( tex, x, y, x + size, y + size );
         else
             Draw::Rect( x, y, x + size, y + size, C_PLACEHOLD );
-        Text( m_titleFont, x + size / 2, y + size + 16, focused ? C_TEXT : C_DIM, s.users[i].title, 0.95f,
+        Text( m_titleFont, x + size / 2, y + size + 16, focused ? C_TEXT : C_DIM, s.users[i].name, 0.95f,
               FONT_CENTER_X );
-        if( s.users[i].isProtected )
-            Text( m_font, x + size / 2, y + size + 48, C_FAINT, L"PIN", 0.8f, FONT_CENTER_X );
+        if( s.users[i].hasPassword )
+            Text( m_font, x + size / 2, y + size + 48, C_FAINT, L"password", 0.8f, FONT_CENTER_X );
     }
 }
 

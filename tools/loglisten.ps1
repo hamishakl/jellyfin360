@@ -1,4 +1,4 @@
-# Receives the console's UDP log lines (set logto=<this PC's IP>:5555 in plex.ini) and
+# Receives the console's UDP log lines (set logto=<this PC's IP>:5555 in jellyfin.ini) and
 # appends them to screenshots\udplog.txt. Lines arrive as they're written, so the log
 # survives a console freeze. Stop with Ctrl+C (or stop the background job).
 param([int]$Port = 5555)

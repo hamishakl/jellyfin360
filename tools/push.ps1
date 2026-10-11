@@ -1,5 +1,5 @@
 # Uploads one file to the console through xbdm (xbcp can't upload to this console).
-#   .\tools\push.ps1 local.ini hdd:\PlexClient\settings.ini
+#   .\tools\push.ps1 local.ini hdd:\Jellyfin360\settings.ini
 param([Parameter(Mandatory)] [string]$Local, [Parameter(Mandatory)] [string]$Remote)
 
 # xbdm.dll is 32-bit, so re-run this script under 32-bit PowerShell.

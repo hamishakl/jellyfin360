@@ -1,5 +1,5 @@
 # Checks that the console recovers on its own: launches the app with testcrash= or testhang=,
-# puts the normal plex.ini back right away, then watches xbdm and the capture card.
+# puts the normal jellyfin.ini back right away, then watches xbdm and the capture card.
 #   .\tools\recovertest.ps1 -Mode hang -After 20 -Watch 90
 param([ValidateSet('crash', 'hang')] [string]$Mode = 'hang', [int]$After = 20, [int]$Watch = 90)
 
@@ -7,12 +7,12 @@ $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 $bin = "$([Environment]::GetEnvironmentVariable('XEDK', 'Machine'))\bin\win32"
 
-$orig = Get-Content plex.ini
-($orig + "test$Mode=$After") | Set-Content plex.ini -Encoding ASCII
+$orig = Get-Content jellyfin.ini
+($orig + "test$Mode=$After") | Set-Content jellyfin.ini -Encoding ASCII
 & "$root\tools\run.ps1" -Wait 0 *>&1 | Out-Null
-$orig | Set-Content plex.ini -Encoding ASCII
+$orig | Set-Content jellyfin.ini -Encoding ASCII
 Start-Sleep 4
-& "$root\tools\push.ps1" plex.ini 'hdd:\PlexClient\plex.ini' | Out-Null   # never relaunch into the test
+& "$root\tools\push.ps1" jellyfin.ini 'hdd:\Jellyfin360\jellyfin.ini' | Out-Null   # never relaunch into the test
 
 Add-Type -AssemblyName System.Drawing
 $t0 = Get-Date
@@ -35,6 +35,6 @@ while (((Get-Date) - $t0).TotalSeconds -lt $Watch) {
     $i++
     Start-Sleep 3
 }
-$log = "$env:TEMP\plexlog.recover.txt"
-& "$bin\xbcp.exe" /Y /Q 'hdd:\PlexClient\plexlog.txt' $log *>&1 | Out-Null
+$log = "$env:TEMP\jellyfin360.recover.txt"
+& "$bin\xbcp.exe" /Y /Q 'hdd:\Jellyfin360\jellyfin360.log' $log *>&1 | Out-Null
 if (Test-Path $log) { Get-Content $log | Select-String 'Test (crash|hang)|GUARD' | ForEach-Object Line }

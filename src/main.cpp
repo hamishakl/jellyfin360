@@ -1,5 +1,5 @@
 //--------------------------------------------------------------------------------------
-// Multiplex 360 - unofficial Plex client for the Xbox 360.
+// Jellyfin 360 - Jellyfin client for the Xbox 360.
 //--------------------------------------------------------------------------------------
 #include <xtl.h>
 #include <winsockx.h>
@@ -12,8 +12,8 @@
 #include <memory>
 #include "Config.h"
 #include "Http.h"
-#include "PlexApi.h"
-#include "PlexTv.h"
+#include "JellyfinApi.h"
+#include "JellyfinAuth.h"
 #include "Log.h"
 #include "FFPlayer.h"
 #include "ffglue.h"
@@ -32,7 +32,7 @@ namespace
 
     const DWORD COLOR_BG_TOP     = 0xff1f1f1f;
     const DWORD COLOR_BG_BOTTOM  = 0xff0a0a0a;
-    const DWORD COLOR_ACCENT     = 0xffe5a00d;   // Plex orange
+    const DWORD COLOR_ACCENT     = 0xff00a4dc;   // Jellyfin blue
     const DWORD COLOR_TEXT       = 0xffeeeeee;
     const DWORD COLOR_DIM        = 0xff8a8a8a;
     const DWORD COLOR_ERROR      = 0xffff6060;
@@ -52,18 +52,11 @@ namespace
         std::string   path;
         double        offset;     // MEDIA: where to start playing
         std::wstring  title;
-        Plex::Result  result;
-        Plex::Media   media;
+        Jellyfin::Result  result;
+        Jellyfin::Media   media;
         volatile LONG done;
 
         Job() : kind( NONE ), offset( 0 ), done( 0 ) {}
-    };
-
-    // A connection candidate: the URL to try and how to describe it on screen.
-    struct Candidate
-    {
-        std::string  url;
-        std::wstring label;
     };
 
     std::wstring Widen( const std::string& s )
@@ -82,10 +75,10 @@ namespace
     }
 }
 
-class PlexApp : public App, public PlayerHost
+class JellyfinApp : public App, public PlayerHost
 {
 public:
-    PlexApp() : m_client( NULL ), m_sessionReady( false ), m_timelineTick( 0 ), m_lastPosition( 0 ),
+    JellyfinApp() : m_client( NULL ), m_sessionReady( false ), m_timelineTick( 0 ), m_lastPosition( 0 ),
                 m_transcoding( false ), m_restarting( false ), m_reconnects( 0 ), m_startGeneration( 0 ), m_menuHeight( 720 ),
                 m_qualityMode( QUALITY_AUTO ), m_qualityPreset( 1 ), m_burnSubs( false ), m_frameStart( 0 ),
                 m_renderMs( 0 ), m_thread( NULL ), m_notify( NULL ), m_busy( false ) {}
@@ -101,7 +94,6 @@ private:
 
     bool         SignIn( std::string& error );
     bool         ConnectToServer( std::string& error );
-    std::vector<Candidate> Candidates( const PlexTv::Server& server ) const;
 
     void         SetStatus( const std::wstring& s );
     std::wstring Status();
@@ -114,18 +106,18 @@ private:
     Font               m_titleFont;
     Config             m_cfg;
     AuthStore          m_auth;
-    Plex::Client*      m_client;
+    Jellyfin::Client*      m_client;
     Browser            m_browser;
-    TaskQueue          m_api;           // background Plex requests for the browser
+    TaskQueue          m_api;           // background server requests for the browser
     ImageCache         m_images;
     UserSettings       m_settings;
     bool               m_sessionReady;  // signed in, connected, browser showing
     DWORD              m_timelineTick;  // last progress report to the server
     double             m_lastPosition;  // playback position, kept after the player stops
 
-    void         PlayItem( const Plex::Item& item, double start );
+    void         PlayItem( const Jellyfin::Item& item, double start );
     void         SignOut();
-    void         SwitchUser( const std::string& token, const std::wstring& name );
+    void         SwitchUser( const JellyfinAuth::Session& session );
     void         ApplySettings();
     void         ReportTimeline( const char* state );
     std::string        m_localIp;
@@ -142,18 +134,19 @@ private:
     FFPlayer           m_player;
     PlayerScreen       m_screen;
     CpuMeter           m_cpu;
-    std::string        m_lanBase;      // http://<LAN ip>:port of the server, if it has one
 
-    void         StartPlayback( const std::string& key, const Plex::Media& media, double offset );
+    // What to ask the server for, from the settings, the quality choice and the chosen tracks.
+    Jellyfin::PlayRequest BuildRequest( double offset ) const;
+    void         StartPlayback( const Jellyfin::Media& media, double offset );
     void         StopPlayback();
     void         UpdatePlayer( Pad* pad );
 
     // What is playing, so a transcode can be restarted at a new time for seeking.
     std::string        m_playKey;
-    Plex::Media        m_playMedia;
+    Jellyfin::Media        m_playMedia;
     std::wstring       m_playTitle;
     bool               m_transcoding;
-    std::string        m_session;
+    Jellyfin::PlayRequest m_playRequest;   // what the current stream was asked for
 
     // While the stream (re)starts the player screen stays up with a message.
     void         RestartPlayback( double position, bool selectStreams, const std::wstring& message );
@@ -204,7 +197,7 @@ private:
 
 
 // Separate function: __try can't live in a function with C++ destructors.
-static void RunGuarded( PlexApp& app )
+static void RunGuarded( JellyfinApp& app )
 {
     __try
     {
@@ -217,10 +210,10 @@ static void RunGuarded( PlexApp& app )
 
 VOID __cdecl main()
 {
-    Log::Open( "game:\\plexlog.txt" );
-    Log::Write( "Multiplex 360 starting" );
+    Log::Open( "game:\\jellyfin360.log" );
+    Log::Write( "Jellyfin 360 starting" );
 
-    PlexApp app;
+    JellyfinApp app;
     // vsync: no tearing, and no extra frames competing with the decoder.
     app.m_d3dpp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
     Guard_Start();
@@ -228,7 +221,7 @@ VOID __cdecl main()
 }
 
 
-HRESULT PlexApp::Initialize()
+HRESULT JellyfinApp::Initialize()
 {
     InitializeCriticalSection( &m_lock );
 
@@ -245,10 +238,10 @@ HRESULT PlexApp::Initialize()
     m_titleFont.SetWindow( SafeArea() );
     m_screen.Init( &m_player, &m_font, &m_titleFont, &m_cpu, this, COLOR_ACCENT );
 
-    m_cfg.Load( "game:\\plex.ini" );
-    Log::Write( "Connection mode: %s", m_cfg.connection.c_str() );
+    m_cfg.Load( "game:\\jellyfin.ini" );
+    Log::Write( "Server: %s", m_cfg.server.empty() ? "(none in jellyfin.ini)" : m_cfg.server.c_str() );
 
-    // settings.ini (Settings screen) overrides plex.ini.
+    // settings.ini (Settings screen) overrides jellyfin.ini.
     m_settings.quality = m_cfg.quality;
     m_settings.kbps = m_cfg.kbps;
     m_settings.directMax = m_cfg.directMax;
@@ -258,13 +251,13 @@ HRESULT PlexApp::Initialize()
     m_api.Start( apiCpu, 1 );
     m_images.Startup( m_pd3dDevice );
     BrowserHost host;
-    host.play = [this]( const Plex::Item& item, double start ) { PlayItem( item, start ); };
+    host.play = [this]( const Jellyfin::Item& item, double start ) { PlayItem( item, start ); };
     host.signOut = [this]() { SignOut(); };
     host.exitApp = []() {
         Log::Write( "Exit to dashboard (sidebar)" );
         XLaunchNewImage( XLAUNCH_KEYWORD_DEFAULT_APP, 0 );
     };
-    host.switchUser = [this]( const std::string& token, const std::wstring& name ) { SwitchUser( token, name ); };
+    host.switchUser = [this]( const JellyfinAuth::Session& session ) { SwitchUser( session ); };
     host.settingsChanged = [this]() { ApplySettings(); };
     m_browser.Startup( m_pd3dDevice, &m_font, &m_titleFont, SafeArea(), &m_api, &m_images, &m_settings,
                        host );
@@ -274,14 +267,14 @@ HRESULT PlexApp::Initialize()
 }
 
 
-void PlexApp::SetStatus( const std::wstring& s )
+void JellyfinApp::SetStatus( const std::wstring& s )
 {
     EnterCriticalSection( &m_lock );
     m_status = s;
     LeaveCriticalSection( &m_lock );
 }
 
-std::wstring PlexApp::Status()
+std::wstring JellyfinApp::Status()
 {
     EnterCriticalSection( &m_lock );
     std::wstring s = m_status;
@@ -289,14 +282,14 @@ std::wstring PlexApp::Status()
     return s;
 }
 
-void PlexApp::SetPinCode( const std::string& code )
+void JellyfinApp::SetPinCode( const std::string& code )
 {
     EnterCriticalSection( &m_lock );
     m_pinCode = code;
     LeaveCriticalSection( &m_lock );
 }
 
-std::string PlexApp::PinCode()
+std::string JellyfinApp::PinCode()
 {
     EnterCriticalSection( &m_lock );
     std::string s = m_pinCode;
@@ -305,13 +298,13 @@ std::string PlexApp::PinCode()
 }
 
 
-void PlexApp::StartJob( Job::Kind kind, const std::string& path, const std::wstring& title )
+void JellyfinApp::StartJob( Job::Kind kind, const std::string& path, const std::wstring& title )
 {
     m_job.kind = kind;
     m_job.path = path;
     m_job.title = title;
-    m_job.result = Plex::Result();
-    m_job.media = Plex::Media();
+    m_job.result = Jellyfin::Result();
+    m_job.media = Jellyfin::Media();
     m_job.done = 0;
     m_busy = true;
     m_error.clear();
@@ -323,167 +316,113 @@ void PlexApp::StartJob( Job::Kind kind, const std::string& path, const std::wstr
 }
 
 
-bool PlexApp::SignIn( std::string& error )
+bool JellyfinApp::SignIn( std::string& error )
 {
-    m_auth.Load( AUTH_PATH );
-    if( m_auth.clientId.empty() )
+    if( m_cfg.server.empty() )
     {
-        m_auth.clientId = NewClientId();
+        error = "No server in jellyfin.ini (server=http://your-server:8096)";
+        return false;
+    }
+    m_auth.Load( AUTH_PATH );
+    if( m_auth.deviceId.empty() )
+    {
+        m_auth.deviceId = NewClientId();
         m_auth.Save( AUTH_PATH );
     }
+    if( !m_auth.token.empty() && m_auth.server != m_cfg.server )
+    {
+        Log::Write( "Server changed (%s -> %s); signing in again", m_auth.server.c_str(), m_cfg.server.c_str() );
+        m_auth.token.clear();
+    }
 
+    JellyfinAuth::Session session;
     if( !m_auth.token.empty() )
     {
-        SetStatus( L"Checking Plex sign-in..." );
+        SetStatus( L"Checking Jellyfin sign-in..." );
         bool invalid;
-        if( PlexTv::CheckToken( m_auth.clientId, m_auth.token, m_username, invalid, error ) )
+        if( JellyfinAuth::CheckToken( m_cfg.server, m_auth.deviceId, m_auth.token, session, invalid, error ) )
+        {
+            m_username = session.username;
+            m_auth.userId = session.userId;
             return true;
+        }
         if( !invalid )
-            return false;   // plex.tv unreachable: keep the token, let the user retry
+            return false;   // server unreachable: keep the token, let the user retry
         Log::Write( "Saved token rejected; signing in again" );
         m_auth.token.clear();
         m_auth.Save( AUTH_PATH );
     }
 
-    SetStatus( L"Getting a sign-in code from plex.tv..." );
-    PlexTv::Pin pin;
-    if( !PlexTv::CreatePin( m_auth.clientId, pin, error ) )
-        return false;
-    SetPinCode( pin.code );
-    SetStatus( L"Waiting for you to enter the code..." );
-
-    DWORD start = GetTickCount();
-    std::string token;
-    PlexTv::PinState state = PlexTv::PIN_WAITING;
-    while( state == PlexTv::PIN_WAITING && GetTickCount() - start < PIN_GIVE_UP_MS )
+    if( !m_cfg.username.empty() )
     {
-        Sleep( PIN_POLL_MS );
-        state = PlexTv::CheckPin( m_auth.clientId, pin, token, error );
+        SetStatus( L"Signing in as " + Widen( m_cfg.username ) + L"..." );
+        if( !JellyfinAuth::Login( m_cfg.server, m_auth.deviceId, m_cfg.username, m_cfg.password, session, error ) )
+            return false;
     }
-    SetPinCode( "" );
-
-    if( state != PlexTv::PIN_LINKED )
+    else
     {
-        if( state == PlexTv::PIN_WAITING )
-            error = "Sign-in timed out";
-        return false;
+        SetStatus( L"Asking the server for a Quick Connect code..." );
+        JellyfinAuth::QuickConnect qc;
+        if( !JellyfinAuth::Start( m_cfg.server, m_auth.deviceId, qc, error ) )
+            return false;
+        SetPinCode( qc.code );
+        SetStatus( L"Waiting for you to approve the code..." );
+
+        DWORD start = GetTickCount();
+        JellyfinAuth::PinState state = JellyfinAuth::PIN_WAITING;
+        while( state == JellyfinAuth::PIN_WAITING && GetTickCount() - start < PIN_GIVE_UP_MS )
+        {
+            Sleep( PIN_POLL_MS );
+            state = JellyfinAuth::Poll( m_cfg.server, m_auth.deviceId, qc, error );
+        }
+        SetPinCode( "" );
+
+        if( state != JellyfinAuth::PIN_LINKED )
+        {
+            if( state == JellyfinAuth::PIN_WAITING )
+                error = "Sign-in timed out";
+            return false;
+        }
+        if( !JellyfinAuth::Finish( m_cfg.server, m_auth.deviceId, qc, session, error ) )
+            return false;
     }
 
-    Log::Write( "Signed in to plex.tv" );
-    m_auth.token = token;
+    m_auth.server = m_cfg.server;
+    m_auth.token = session.token;
+    m_auth.userId = session.userId;
+    m_auth.username = std::string( session.username.begin(), session.username.end() );
+    m_username = session.username;
     if( !m_auth.Save( AUTH_PATH ) )
         Log::Write( "Could not save %s", AUTH_PATH );
-
-    bool invalid;
-    PlexTv::CheckToken( m_auth.clientId, m_auth.token, m_username, invalid, error );
-    error.clear();
     return true;
 }
 
 
-std::vector<Candidate> PlexApp::Candidates( const PlexTv::Server& server ) const
+bool JellyfinApp::ConnectToServer( std::string& error )
 {
-    const std::string& mode = m_cfg.connection;
-    bool wantLocal  = mode == "auto" || mode == "local";
-    bool wantRemote = mode == "auto" || mode == "remote";
-    bool wantRelay  = mode == "auto" || mode == "relay";
-
-    std::vector<Candidate> out;
-    // LAN first, then internet, then Plex Relay.
-    for( int pass = 0; pass < 3; ++pass )
+    SetStatus( L"Connecting to the server..." );
+    Jellyfin::Client* client = new Jellyfin::Client( m_cfg.server, m_auth.token, m_auth.deviceId, m_auth.userId );
+    std::wstring name, version;
+    std::string pingError;
+    if( !client->Ping( PING_TIMEOUT_MS, name, version, pingError ) )
     {
-        for( size_t i = 0; i < server.connections.size(); ++i )
-        {
-            const PlexTv::Connection& c = server.connections[i];
-            if( pass == 0 && wantLocal && c.local && !c.relay )
-            {
-                Candidate secure = { c.uri, L"Home network" };
-                out.push_back( secure );
-                // Some routers' DNS rebinding protection blocks plex.direct names for LAN
-                // addresses, so also try the plain LAN address.
-                char url[64];
-                sprintf_s( url, "http://%s:%d", c.address.c_str(), c.port );
-                Candidate plain = { url, L"Home network" };
-                out.push_back( plain );
-            }
-            if( pass == 1 && wantRemote && !c.local && !c.relay )
-            {
-                Candidate remote = { c.uri, L"Internet" };
-                out.push_back( remote );
-            }
-            if( pass == 2 && wantRelay && c.relay )
-            {
-                Candidate relay = { c.uri, L"Plex Relay (slow)" };
-                out.push_back( relay );
-            }
-        }
-    }
-    return out;
-}
-
-
-bool PlexApp::ConnectToServer( std::string& error )
-{
-    SetStatus( L"Finding your Plex server..." );
-    std::vector<PlexTv::Server> servers;
-    if( !PlexTv::GetServers( m_auth.clientId, m_auth.token, servers, error ) )
-        return false;
-
-    // Pick the server named in plex.ini, else the first one this account owns.
-    const PlexTv::Server* server = NULL;
-    std::wstring wantName = Widen( m_cfg.serverName );
-    for( size_t i = 0; i < servers.size() && !server; ++i )
-        if( wantName.empty() ? servers[i].owned : servers[i].name == wantName )
-            server = &servers[i];
-    if( !server )
-        server = &servers[0];
-
-    std::vector<Candidate> candidates = Candidates( *server );
-    if( candidates.empty() )
-    {
-        error = "No usable connection for this server (connection=" + m_cfg.connection + ")";
-        return false;
-    }
-
-    for( size_t i = 0; i < candidates.size(); ++i )
-    {
-        SetStatus( L"Connecting to " + server->name + L" (" + candidates[i].label + L")..." );
-        Plex::Client* client = new Plex::Client( candidates[i].url, server->accessToken, m_auth.clientId );
-        std::wstring version;
-        std::string pingError;
-        Http::Url u;
-        u.Parse( candidates[i].url );
-        if( client->Ping( PING_TIMEOUT_MS, version, pingError ) )
-        {
-            Log::Write( "Using %s connection %s://%s:%d", u.https ? "secure" : "plain",
-                        u.https ? "https" : "http", u.host.c_str(), u.port );
-            m_client = client;
-            for( size_t k = 0; k < server->connections.size(); ++k )
-            {
-                const PlexTv::Connection& c = server->connections[k];
-                if( c.local && !c.relay )
-                {
-                    char lan[64];
-                    sprintf_s( lan, "http://%s:%d", c.address.c_str(), c.port );
-                    m_lanBase = lan;
-                }
-            }
-            m_serverLabel = server->name + L" - " + candidates[i].label +
-                            ( u.https ? L"" : L", unencrypted" ) + L" - Plex " + version;
-            return true;
-        }
-        Log::Write( "Connection %s:%d failed: %s", u.host.c_str(), u.port, pingError.c_str() );
         delete client;
+        error = "Could not reach " + m_cfg.server + ": " + pingError;
+        return false;
     }
-
-    error = "Could not reach the server on any connection. Is Remote Access on in the server settings?";
-    return false;
+    Http::Url u;
+    u.Parse( m_cfg.server );
+    Log::Write( "Connected to '%ls' (Jellyfin %ls) at %s://%s:%d", name.c_str(), version.c_str(),
+                u.https ? "https" : "http", u.host.c_str(), u.port );
+    m_client = client;
+    m_serverLabel = name + ( u.https ? L"" : L" - unencrypted" ) + L" - Jellyfin " + version;
+    return true;
 }
 
 
-DWORD WINAPI PlexApp::JobThread( LPVOID param )
+DWORD WINAPI JellyfinApp::JobThread( LPVOID param )
 {
-    PlexApp* app = (PlexApp*)param;
+    JellyfinApp* app = (JellyfinApp*)param;
     Job& job = app->m_job;
 
     switch( job.kind )
@@ -513,7 +452,7 @@ DWORD WINAPI PlexApp::JobThread( LPVOID param )
         }
         break;
     case Job::MEDIA:
-        job.media = app->m_client->GetMedia( job.path, app->m_settings.directMax );
+        job.media = app->m_client->GetMedia( job.path, app->BuildRequest( job.offset ) );
         break;
     default:
         break;
@@ -524,7 +463,7 @@ DWORD WINAPI PlexApp::JobThread( LPVOID param )
 }
 
 
-void PlexApp::FinishJob()
+void JellyfinApp::FinishJob()
 {
     WaitForSingleObject( m_thread, INFINITE );
     CloseHandle( m_thread );
@@ -535,13 +474,13 @@ void PlexApp::FinishJob()
     if( m_job.kind == Job::MEDIA )
     {
         if( m_job.media.ok )
-            StartPlayback( m_job.path, m_job.media, m_job.offset );
+            StartPlayback( m_job.media, m_job.offset );
         else
             m_browser.Toast( Widen( m_job.media.error ) );
         return;
     }
 
-    Plex::Result& r = m_job.result;
+    Jellyfin::Result& r = m_job.result;
     if( !r.ok )
     {
         m_error = r.error;
@@ -549,19 +488,19 @@ void PlexApp::FinishJob()
         return;
     }
 
-    m_browser.SetSession( m_client, m_auth.clientId, m_auth.token, m_username, m_serverLabel, r.items );
+    m_browser.SetSession( m_client, m_auth.deviceId, m_auth.token, m_username, m_serverLabel, r.items );
     m_sessionReady = true;
 
     if( !m_cfg.autoplay.empty() )
     {
         Log::Write( "Autoplay %s from %d s", m_cfg.autoplay.c_str(), m_cfg.autoplayStart );
         m_job.offset = m_cfg.autoplayStart;
-        StartJob( Job::MEDIA, "/library/metadata/" + m_cfg.autoplay, L"" );
+        StartJob( Job::MEDIA, m_cfg.autoplay, L"" );
     }
 }
 
 
-HRESULT PlexApp::Update()
+HRESULT JellyfinApp::Update()
 {
     if( m_busy && m_job.done )
         FinishJob();
@@ -638,10 +577,10 @@ HRESULT PlexApp::Update()
             m_browser.Toast( L"Playback failed: " + Widen( m_player.Error() ) );
         }
         ReportTimeline( "stopped" );
-        if( m_transcoding && !m_session.empty() )
+        if( m_transcoding && !m_playMedia.playSessionId.empty() )
         {
-            Plex::Client client = *m_client;
-            std::string session = m_session;
+            Jellyfin::Client client = *m_client;
+            std::string session = m_playMedia.playSessionId;
             m_api.Post( [client, session]() mutable { client.StopTranscode( session ); }, std::function<void()>() );
         }
         m_transcoding = false;
@@ -668,15 +607,15 @@ HRESULT PlexApp::Update()
     return S_OK;
 }
 
-void PlexApp::RenderSignIn( const std::string& code, const D3DRECT& safe )
+void JellyfinApp::RenderSignIn( const std::string& code, const D3DRECT& safe )
 {
     float cx = (float)( safe.x2 - safe.x1 ) / 2.0f;
 
     m_titleFont.Begin();
-    m_titleFont.DrawText( cx, 130, COLOR_TEXT, L"Sign in to Plex", FONT_CENTER_X );
-    m_titleFont.DrawText( cx, 190, COLOR_DIM, L"On your phone or computer, go to", FONT_CENTER_X );
+    m_titleFont.DrawText( cx, 130, COLOR_TEXT, L"Sign in to Jellyfin", FONT_CENTER_X );
+    m_titleFont.DrawText( cx, 190, COLOR_DIM, L"In Jellyfin on your phone or computer, open", FONT_CENTER_X );
     m_titleFont.SetScaleFactors( 1.6f, 1.6f );
-    m_titleFont.DrawText( cx, 225, COLOR_ACCENT, L"plex.tv/link", FONT_CENTER_X );
+    m_titleFont.DrawText( cx, 225, COLOR_ACCENT, L"your user menu > Quick Connect", FONT_CENTER_X );
     m_titleFont.SetScaleFactors( 1.0f, 1.0f );
     m_titleFont.DrawText( cx, 300, COLOR_DIM, L"and enter this code:", FONT_CENTER_X );
     m_titleFont.SetScaleFactors( 3.5f, 3.5f );
@@ -686,7 +625,7 @@ void PlexApp::RenderSignIn( const std::string& code, const D3DRECT& safe )
 }
 
 
-HRESULT PlexApp::Render()
+HRESULT JellyfinApp::Render()
 {
     m_frameStart = GetTickCount();
     D3DRECT safe = SafeArea();
@@ -718,7 +657,7 @@ HRESULT PlexApp::Render()
 
     m_titleFont.Begin();
     m_titleFont.SetScaleFactors( 2.2f, 2.2f );
-    m_titleFont.DrawText( width / 2, pinCode.empty() ? 230.0f : 20.0f, COLOR_ACCENT, L"MULTIPLEX 360", FONT_CENTER_X );
+    m_titleFont.DrawText( width / 2, pinCode.empty() ? 230.0f : 20.0f, COLOR_ACCENT, L"JELLYFIN 360", FONT_CENTER_X );
     m_titleFont.SetScaleFactors( 1.0f, 1.0f );
     m_titleFont.End();
 
@@ -745,29 +684,34 @@ HRESULT PlexApp::Render()
 //--------------------------------------------------------------------------------------
 // Playback
 //--------------------------------------------------------------------------------------
-namespace
+Jellyfin::PlayRequest JellyfinApp::BuildRequest( double offset ) const
 {
-
-    bool OneOf( const std::string& s, const char* const* list )
+    Jellyfin::PlayRequest r;
+    r.startSeconds = offset;
+    r.directMaxHeight = m_settings.directMax;
+    r.directMaxKbps = m_cfg.directKbps;
+    r.maxHeight = m_settings.quality;
+    r.maxKbps = m_settings.kbps;
+    if( m_qualityMode == QUALITY_ORIGINAL )
     {
-        for( ; *list; ++list )
-            if( s == *list )
-                return true;
-        return false;
+        // Play the file as-is whatever its size; 1080p H.264 only decodes at ~9 fps on Xenon.
+        r.directMaxHeight = 4320;
+        r.directMaxKbps = 200000;
     }
-
-    // Decode cost grows with bitrate, so heavy files are converted even at a playable size.
-    bool CanDirectPlay( const Plex::Media& m, int maxHeight, int maxKbps )
+    else if( m_qualityMode == QUALITY_PRESET )
     {
-        static const char* const video[] = { "h264", "mpeg4", 0 };
-        static const char* const audio[] = { "aac", "ac3", "eac3", "mp3", "mp2", "dca", "", 0 };
-        static const char* const containers[] = { "mkv", "mp4", "m4v", "mov", "avi", "mpegts", "ts", 0 };
-        return OneOf( m.videoCodec, video ) && OneOf( m.audioCodec, audio ) && OneOf( m.container, containers ) &&
-               m.height > 0 && m.height <= maxHeight && ( m.bitrate == 0 || m.bitrate <= maxKbps );
+        r.allowDirectPlay = false;
+        r.maxHeight = QUALITY_PRESETS[m_qualityPreset].height;
+        r.maxKbps = QUALITY_PRESETS[m_qualityPreset].kbps;
     }
+    const Jellyfin::Stream* a = m_playMedia.SelectedStream( 2 );
+    const Jellyfin::Stream* st = m_playMedia.SelectedStream( 3 );
+    r.audioIndex = a ? a->index : -1;
+    r.subtitleIndex = st ? st->index : -1;   // the server draws subtitles into the picture
+    return r;
 }
 
-void PlexApp::StartPlayback( const std::string& key, const Plex::Media& media, double offset )
+void JellyfinApp::StartPlayback( const Jellyfin::Media& media, double offset )
 {
     if( !m_player.Startup( m_pd3dDevice ) )
     {
@@ -775,183 +719,137 @@ void PlexApp::StartPlayback( const std::string& key, const Plex::Media& media, d
         return;
     }
     fg_set_decode_threads( m_cfg.threads );
-    // Server calls go through m_api (one worker, in order) so the UI never blocks on them.
     m_player.Stop();
-    bool endingTranscode = m_transcoding && !m_session.empty();
-    if( endingTranscode )
+    // A previous conversion of this device is replaced by the new play session; tell the server.
+    if( m_transcoding && !m_playMedia.playSessionId.empty() && m_playMedia.playSessionId != media.playSessionId )
     {
-        Plex::Client client = *m_client;
-        std::string session = m_session;
+        Jellyfin::Client client = *m_client;
+        std::string session = m_playMedia.playSessionId;
         m_api.Post( [client, session]() mutable { client.StopTranscode( session ); }, std::function<void()>() );
     }
     if( !m_restarting )
         m_restartMessage = L"Starting...";
-    int generation = ++m_startGeneration;
+    ++m_startGeneration;
 
-    m_playKey = key;
+    m_playKey = media.itemId;
     m_playMedia = media;
     m_playTitle = media.title;
+    m_playRequest = BuildRequest( offset );
     m_screen.Reset();
-    std::vector<std::string> urls;
-    std::vector<std::wstring> labels;
 
-    const Plex::Stream* audio = media.SelectedStream( 2 );
-    m_burnSubs = media.SelectedStream( 3 ) != NULL;     // Plex draws subtitles into the picture
-    fg_set_audio_track( audio ? audio->index : -1 );
-    if( m_qualityMode == QUALITY_ORIGINAL && !m_burnSubs )
-        m_transcoding = false;
-    else if( m_qualityMode == QUALITY_PRESET || m_burnSubs )
-        m_transcoding = true;
-    else
-    {
-        // At home the decoder is the limit, not the network: up to 8 Mbit/s plays smoothly.
-        // 1080p H.264 only decodes at ~9 fps on Xenon, so directMax stays at 720.
-        bool home = m_serverLabel.find( L"Home network" ) != std::wstring::npos;
-        int maxKbps = home ? ( m_settings.kbps > 8000 ? m_settings.kbps : 8000 ) : m_settings.kbps;
-        m_transcoding = !CanDirectPlay( media, m_settings.directMax, maxKbps );
-    }
-    Log::Write( "Playback decision: %s (quality mode %d, burn subtitles %d, server %ls)",
-                m_transcoding ? "transcode" : "direct", m_qualityMode, m_burnSubs ? 1 : 0, m_serverLabel.c_str() );
+    const Jellyfin::Stream* audio = media.SelectedStream( 2 );
+    m_burnSubs = media.SelectedStream( 3 ) != NULL;
+    m_transcoding = !media.directPlay;
+    // Direct play: pick the track inside the file. A conversion carries one audio track.
+    fg_set_audio_track( !m_transcoding && audio ? audio->index : -1 );
+    Log::Write( "Playback decision: %s (quality mode %d, burn subtitles %d, %s %s/%s %dp %d kbps)",
+                m_transcoding ? "transcode" : "direct", m_qualityMode, m_burnSubs ? 1 : 0, media.container.c_str(),
+                media.videoCodec.c_str(), media.audioCodec.c_str(), media.height, media.bitrate );
     m_player.SetBrightness( m_settings.brightness * 0.02f );
     m_player.SetAspect( m_settings.aspect );
     m_timelineTick = GetTickCount();
+
+    std::vector<std::string> urls;
+    std::vector<std::wstring> labels;
     if( !m_transcoding )
     {
-        // At home the file comes over plain http (HTTPS decryption caps out near 8 Mbit/s on
-        // Xenon), so it carries a transient token, not the account token. New session id per
-        // play, or the server may still apply our last transcode-only session and return 503.
-        bool lan = !m_lanBase.empty() && m_serverLabel.find( L"Home network" ) != std::wstring::npos;
-        std::string base = m_client->Base(), lanBase = m_lanBase, partKey = media.partKey;
-        std::string clientHeaders = PlexTv::ClientHeaders( m_auth.clientId ) + "X-Plex-Session-Identifier: " +
-                                    NewClientId().substr( 8 ) + "\r\n";
-        Log::Write( "Direct play %s (%s %s/%s %dp %d kbps)", key.c_str(), media.container.c_str(),
-                    media.videoCodec.c_str(), media.audioCodec.c_str(), media.height, media.bitrate );
-
-        // Runs after any transcode stop queued above (one stream per device).
-        m_restarting = true;
-        Plex::Client client = *m_client;
-        std::shared_ptr<std::string> transient( new std::string );
-        m_api.Post( [client, lan, transient]() mutable {
-                        if( lan && !client.TransientToken( *transient ) )
-                            Log::Write( "No transient token; streaming over HTTPS only" );
-                    },
-                    [this, generation, lan, base, lanBase, partKey, clientHeaders, transient, offset]() {
-                        if( generation != m_startGeneration || !m_restarting )
-                            return;
-                        std::vector<std::string> urls;
-                        std::vector<std::wstring> labels;
-                        std::string token = m_client->Token();
-                        if( lan && !transient->empty() )
-                        {
-                            urls.push_back( lanBase + partKey );
-                            labels.push_back( L"direct play (LAN)" );
-                            token = *transient;
-                        }
-                        urls.push_back( base + partKey );
-                        labels.push_back( L"direct play" );
-                        m_player.Open( urls, labels, clientHeaders + "X-Plex-Token: " + token + "\r\n", offset );
-                        m_restarting = false;
-                    } );
-        return;
+        urls.push_back( media.directUrl );
+        labels.push_back( L"direct play" );
+        m_player.Open( urls, labels, m_client->Headers(), offset );
     }
-
-    // Converted by the server to H.264 + stereo AAC.
-    int height = m_settings.quality, kbps = m_settings.kbps;
-    if( m_qualityMode == QUALITY_PRESET )
+    else
     {
-        height = QUALITY_PRESETS[m_qualityPreset].height;
-        kbps = QUALITY_PRESETS[m_qualityPreset].kbps;
+        if( media.transcodeUrl.empty() )
+        {
+            Log::Write( "Server offered neither direct play nor a conversion" );
+            m_restarting = false;
+            m_browser.Toast( L"The server can't convert this video" );
+            return;
+        }
+        urls.push_back( media.transcodeUrl );
+        wchar_t label[64];
+        swprintf_s( label, L"converted by Jellyfin to %dp %g Mbps", m_playRequest.maxHeight, m_playRequest.maxKbps / 1000.0 );
+        labels.push_back( label );
+        // The conversion starts at 'offset', so the player shows times from there.
+        m_player.Open( urls, labels, m_client->Headers(), 0.0, offset, media.duration );
     }
-    // Fixed session id: a new transcode replaces a leftover one instead of getting 503.
-    m_session = m_auth.clientId;
-    std::string url = m_client->TranscodeUrl( key, offset, height, kbps, m_session, m_burnSubs, media.mediaIndex );
-    // /start returns 400 without a /decision first.
-    std::string decision = url;
-    decision.replace( decision.find( "/start?" ), 7, "/decision?" );
-    urls.push_back( url );
-    wchar_t label[64];
-    swprintf_s( label, L"converted by Plex to %dp %g Mbps", height, kbps / 1000.0 );
-    labels.push_back( label );
-    Log::Write( "Transcode %s from %.0f s at %dp %d kbps (%s %s/%s %dp %d kbps)", key.c_str(), offset, height, kbps,
-                media.container.c_str(), media.videoCodec.c_str(), media.audioCodec.c_str(), media.height, media.bitrate );
-
-    m_restarting = true;
-    std::string headers = m_client->TranscodeHeaders();
-    double duration = media.duration;
-    m_api.Post( [decision, headers]() {
-                    Http::Response d = Http::Get( decision, headers, 10000 );
-                    Log::Write( "Transcode decision -> %d", d.status );
-                },
-                [this, generation, urls, labels, headers, offset, duration]() {
-                    if( generation != m_startGeneration || !m_restarting )
-                        return;     // cancelled, or replaced by a newer start
-                    m_player.Open( urls, labels, headers, 0.0, offset, duration );
-                    m_restarting = false;
-                } );
+    m_restarting = false;
+    ReportTimeline( "start" );
 }
 
-void PlexApp::RestartPlayback( double position, bool selectStreams, const std::wstring& message )
+void JellyfinApp::RestartPlayback( double position, bool selectStreams, const std::wstring& message )
 {
+    // Every restart asks the server again: quality, tracks and start point all live in the
+    // PlaybackInfo request, and a conversion can only start at a new time by being re-made.
+    (void)selectStreams;
     m_restartMessage = message;
     m_restarting = true;
     m_player.Stop();
-    if( !selectStreams )
-    {
-        StartPlayback( m_playKey, m_playMedia, position );
-        return;
-    }
-    // The server keeps the track choice per file.
-    const Plex::Stream* a = m_playMedia.SelectedStream( 2 );
-    const Plex::Stream* s = m_playMedia.SelectedStream( 3 );
-    Plex::Client client = *m_client;
-    std::string partId = m_playMedia.partId;
-    int audioId = a ? a->id : 0, subId = s ? s->id : 0;
     int generation = ++m_startGeneration;
-    Log::Write( "Tracks changed: audio %d, subtitles %d", audioId, subId );
-    m_api.Post( [client, partId, audioId, subId]() mutable { client.SelectStreams( partId, audioId, subId ); },
-                [this, generation, position]() {
-                    if( generation == m_startGeneration && m_restarting )
-                        StartPlayback( m_playKey, m_playMedia, position );
+    Jellyfin::Client client = *m_client;
+    std::string itemId = m_playKey;
+    Jellyfin::PlayRequest req = BuildRequest( position );
+    std::shared_ptr<Jellyfin::Media> media( new Jellyfin::Media );
+    Log::Write( "Restart at %.0f s: audio %d, subtitles %d, direct %d, %dp %d kbps", position, req.audioIndex,
+                req.subtitleIndex, req.allowDirectPlay ? 1 : 0, req.maxHeight, req.maxKbps );
+    m_api.Post( [client, itemId, req, media]() mutable { *media = client.GetMedia( itemId, req ); },
+                [this, generation, media, position]() {
+                    if( generation != m_startGeneration || !m_restarting )
+                        return;     // cancelled, or replaced by a newer start
+                    if( !media->ok )
+                    {
+                        Log::Write( "Restart failed: %s", media->error.c_str() );
+                        m_restarting = false;
+                        m_browser.Toast( L"Could not restart: " + Widen( media->error ) );
+                        return;
+                    }
+                    StartPlayback( *media, position );
                 } );
 }
 
-void PlexApp::StopPlayback()
+void JellyfinApp::StopPlayback()
 {
     m_player.Stop();
 }
 
-void PlexApp::PlayItem( const Plex::Item& item, double start )
+void JellyfinApp::PlayItem( const Jellyfin::Item& item, double start )
 {
     if( m_busy || !m_client )
         return;
     m_job.offset = start;
     m_qualityMode = QUALITY_AUTO;    // per-video choice from the options menu
     m_reconnects = 0;
-    StartJob( Job::MEDIA, "/library/metadata/" + item.ratingKey, item.title );
+    m_playMedia = Jellyfin::Media();  // track choices start from the server's defaults
+    StartJob( Job::MEDIA, item.id, item.title );
 }
 
-void PlexApp::ReportTimeline( const char* state )
+void JellyfinApp::ReportTimeline( const char* state )
 {
-    if( !m_client || m_playMedia.ratingKey.empty() )
+    if( !m_client || m_playMedia.itemId.empty() )
         return;
-    Plex::Client client = *m_client;
-    std::string key = m_playMedia.ratingKey, st = state;
+    Jellyfin::Client client = *m_client;
+    Jellyfin::Media media = m_playMedia;
+    std::string st = state;
+    Jellyfin::PlayState ps = st == "start" ? Jellyfin::PLAY_START : st == "stopped" ? Jellyfin::PLAY_STOPPED :
+                             st == "paused" ? Jellyfin::PLAY_PAUSED : Jellyfin::PLAY_PROGRESS;
     double pos = m_player.IsActive() ? m_player.Position() : m_lastPosition;
-    double dur = m_playMedia.duration;
-    m_api.Post( [client, key, st, pos, dur]() mutable { client.Timeline( key, st.c_str(), pos, dur ); },
+    m_api.Post( [client, media, ps, pos]() mutable { client.Report( media, ps, pos, ps == Jellyfin::PLAY_PAUSED ); },
                 std::function<void()>() );
 }
 
-void PlexApp::ApplySettings()
+void JellyfinApp::ApplySettings()
 {
     m_player.SetBrightness( m_settings.brightness * 0.02f );
     m_player.SetAspect( m_settings.aspect );
 }
 
-void PlexApp::SignOut()
+void JellyfinApp::SignOut()
 {
     Log::Write( "Signing out" );
+    if( !m_auth.token.empty() )
+        JellyfinAuth::Logout( m_cfg.server, m_auth.deviceId, m_auth.token );
     m_auth.token.clear();
+    m_auth.userId.clear();
     m_auth.Save( AUTH_PATH );
     m_sessionReady = false;
     delete m_client;
@@ -961,24 +859,26 @@ void PlexApp::SignOut()
     StartJob( Job::STARTUP, "", L"" );
 }
 
-void PlexApp::SwitchUser( const std::string& token, const std::wstring& name )
+void JellyfinApp::SwitchUser( const JellyfinAuth::Session& session )
 {
-    Log::Write( "Switching Plex Home user" );
-    m_auth.token = token;
+    Log::Write( "Switching user to %ls", session.username.c_str() );
+    m_auth.token = session.token;
+    m_auth.userId = session.userId;
+    m_auth.username = std::string( session.username.begin(), session.username.end() );
     m_auth.Save( AUTH_PATH );
     m_sessionReady = false;
     delete m_client;
     m_client = NULL;
-    m_username = name;
+    m_username = session.username;
     m_images.Clear();
     StartJob( Job::STARTUP, "", L"" );
 }
 
 
 //--------------------------------------------------------------------------------------
-// Player screen (PlayerScreen does the timeline, seeking and menu; these are the Plex parts)
+// Player screen (PlayerScreen does the timeline, seeking and menu; these are the server parts)
 //--------------------------------------------------------------------------------------
-void PlexApp::Seek( double target )
+void JellyfinApp::Seek( double target )
 {
     if( !m_transcoding )
         m_player.SeekAbsolute( target );
@@ -986,18 +886,18 @@ void PlexApp::Seek( double target )
         RestartPlayback( target, false, L"Jumping to " + FormatTime( target ) );   // a live transcode restarts there
 }
 
-void PlexApp::Leave()
+void JellyfinApp::Leave()
 {
     StopPlayback();
 }
 
-void PlexApp::CancelStart()
+void JellyfinApp::CancelStart()
 {
     m_restarting = false;
     ++m_startGeneration;
 }
 
-std::wstring PlexApp::Tag() const
+std::wstring JellyfinApp::Tag() const
 {
     if( !m_transcoding )
         return L"Original";
@@ -1012,24 +912,22 @@ std::wstring PlexApp::Tag() const
     return buf;
 }
 
-IDirect3DTexture9* PlexApp::Preview( double seconds )
+IDirect3DTexture9* JellyfinApp::Preview( double seconds )
 {
-    if( !m_playMedia.hasPreviews || m_playMedia.partId.empty() )
-        return NULL;
-    char path[96];
-    sprintf_s( path, "/library/parts/%s/indexes/sd/%u", m_playMedia.partId.c_str(), (unsigned)( seconds / 10 ) * 10000u );
-    m_images.Pump();
-    return m_images.Get( path, 320, 180 );
+    // Jellyfin trickplay (10.9+) serves tiled sprite sheets, which need cropping before they
+    // can be shown; not wired up yet.
+    (void)seconds;
+    return NULL;
 }
 
-std::wstring PlexApp::StatsMode() const
+std::wstring JellyfinApp::StatsMode() const
 {
     wchar_t buf[64];
     swprintf_s( buf, L"%d decode threads   %s", m_cfg.threads, m_transcoding ? L"server transcoding" : L"direct play" );
     return buf;
 }
 
-void PlexApp::UpdatePlayer( Pad* pad )
+void JellyfinApp::UpdatePlayer( Pad* pad )
 {
     m_player.Update();
 
@@ -1113,7 +1011,7 @@ void PlexApp::UpdatePlayer( Pad* pad )
     m_screen.Update( pad );
 }
 
-void PlexApp::RenderPlayer( const D3DRECT& safe )
+void JellyfinApp::RenderPlayer( const D3DRECT& safe )
 {
     m_pd3dDevice->Clear( 0, NULL, D3DCLEAR_TARGET, 0xff000000, 1.0f, 0 );
     D3DRECT full = { 0, 0, (LONG)m_d3dpp.BackBufferWidth, (LONG)m_d3dpp.BackBufferHeight };
@@ -1121,7 +1019,7 @@ void PlexApp::RenderPlayer( const D3DRECT& safe )
     m_screen.Render( safe, m_renderMs );
 }
 
-void PlexApp::EndFrame()
+void JellyfinApp::EndFrame()
 {
     m_renderMs = m_renderMs * 0.9f + ( GetTickCount() - m_frameStart ) * 0.1f;
 
@@ -1138,9 +1036,9 @@ void PlexApp::EndFrame()
 //--------------------------------------------------------------------------------------
 // Options menu
 //--------------------------------------------------------------------------------------
-std::wstring PlexApp::TrackName( int streamType ) const
+std::wstring JellyfinApp::TrackName( int streamType ) const
 {
-    const Plex::Stream* s = m_playMedia.SelectedStream( streamType );
+    const Jellyfin::Stream* s = m_playMedia.SelectedStream( streamType );
     if( !s )
         return streamType == 3 ? L"Off" : L"Default";
     if( !s->shortTitle.empty() )
@@ -1148,7 +1046,7 @@ std::wstring PlexApp::TrackName( int streamType ) const
     return s->title.empty() ? Widen( s->language ) : s->title;
 }
 
-std::vector<int> PlexApp::TrackList( int streamType ) const
+std::vector<int> JellyfinApp::TrackList( int streamType ) const
 {
     std::vector<int> list;
     if( streamType == 3 )
@@ -1159,7 +1057,7 @@ std::vector<int> PlexApp::TrackList( int streamType ) const
     return list;
 }
 
-std::wstring PlexApp::QualityName() const
+std::wstring JellyfinApp::QualityName() const
 {
     if( m_qualityMode == QUALITY_ORIGINAL )
         return m_burnSubs ? L"Original - converted for subtitles" : L"Original";
@@ -1173,7 +1071,7 @@ std::wstring PlexApp::QualityName() const
     return L"Auto";
 }
 
-void PlexApp::BuildMenu( int page, MenuPage& out )
+void JellyfinApp::BuildMenu( int page, MenuPage& out )
 {
     MenuEntry e;
     wchar_t buf[48];
@@ -1230,7 +1128,7 @@ void PlexApp::BuildMenu( int page, MenuPage& out )
             int type = page == PAGE_AUDIO ? 2 : 3;
             out.title = type == 2 ? L"Audio" : L"Subtitles";
             std::vector<int> list = TrackList( type );
-            const Plex::Stream* selected = m_playMedia.SelectedStream( type );
+            const Jellyfin::Stream* selected = m_playMedia.SelectedStream( type );
             for( size_t i = 0; i < list.size(); ++i )
             {
                 if( list[i] < 0 )
@@ -1240,7 +1138,7 @@ void PlexApp::BuildMenu( int page, MenuPage& out )
                 }
                 else
                 {
-                    const Plex::Stream& s = m_playMedia.streams[list[i]];
+                    const Jellyfin::Stream& s = m_playMedia.streams[list[i]];
                     e.label = s.title.empty() ? Widen( s.language ) : s.title;
                     if( e.label.empty() )
                         e.label = L"Track";
@@ -1278,7 +1176,7 @@ void PlexApp::BuildMenu( int page, MenuPage& out )
     }
 }
 
-MenuMove PlexApp::Choose( int page, int sel )
+MenuMove JellyfinApp::Choose( int page, int sel )
 {
     double pos = m_player.Position();
     switch( page )
@@ -1389,13 +1287,13 @@ MenuMove PlexApp::Choose( int page, int sel )
     return MenuMove::Stay();
 }
 
-void PlexApp::AspectChanged()
+void JellyfinApp::AspectChanged()
 {
     m_settings.aspect = m_player.Aspect();
     m_settings.Save( "game:\\settings.ini" );
 }
 
-MenuMove PlexApp::Back( int page )
+MenuMove JellyfinApp::Back( int page )
 {
     switch( page )
     {
@@ -1413,7 +1311,7 @@ MenuMove PlexApp::Back( int page )
     return MenuMove::Close();
 }
 
-void PlexApp::SliderStep( int page, int step )
+void JellyfinApp::SliderStep( int page, int step )
 {
     if( page != PAGE_BRIGHTNESS )
         return;

@@ -11,9 +11,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectName>PlexClient</ProjectName>
+    <ProjectName>JellyfinClient</ProjectName>
     <ProjectGuid>{5E0C3A1D-7B2F-4C1E-9A8D-3F6B2E1C9D40}</ProjectGuid>
-    <RootNamespace>PlexClient</RootNamespace>
+    <RootNamespace>JellyfinClient</RootNamespace>
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -34,7 +34,7 @@
     <TargetName>default</TargetName>
     <ImageXexOutput>$(OutDir)default.xex</ImageXexOutput>
     <LinkIncremental>false</LinkIncremental>
-    <RemoteRoot>hdd:\PlexClient</RemoteRoot>
+    <RemoteRoot>hdd:\Jellyfin360</RemoteRoot>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="PropertySheets">
@@ -110,13 +110,14 @@
     <ClCompile Include="src\Config.cpp" />
     <ClCompile Include="src\Http.cpp" />
     <ClCompile Include="src\Log.cpp" />
-    <ClCompile Include="src\PlexApi.cpp" />
+    <ClCompile Include="src\JellyfinApi.cpp" />
+    <ClCompile Include="src\JellyfinAuth.cpp" />
+    <ClCompile Include="src\Json.cpp" />
     <ClCompile Include="src\Draw.cpp" />
     <ClCompile Include="src\FFPlayer.cpp" />
     <ClCompile Include="src\ffglue.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="src\PlexTv.cpp" />
     <ClCompile Include="src\Tls.cpp" />
     <ClCompile Include="src\Xml.cpp" />
   </ItemGroup>
@@ -133,11 +134,13 @@
     <ClInclude Include="src\Config.h" />
     <ClInclude Include="src\Http.h" />
     <ClInclude Include="src\Log.h" />
-    <ClInclude Include="src\PlexApi.h" />
+    <ClInclude Include="src\JellyfinApi.h" />
+    <ClInclude Include="src\JellyfinAuth.h" />
+    <ClInclude Include="src\Json.h" />
+    <ClInclude Include="src\Platform.h" />
     <ClInclude Include="src\Draw.h" />
     <ClInclude Include="src\FFPlayer.h" />
     <ClInclude Include="src\ffglue.h" />
-    <ClInclude Include="src\PlexTv.h" />
     <ClInclude Include="src\Tls.h" />
     <ClInclude Include="src\CaCerts.inc" />
     <ClInclude Include="src\mbedtls_config_xbox.h" />

@@ -1,5 +1,5 @@
 # Builds an Xbox GDF (XDVDFS) disc image from a folder, for gdf2content.
-#   .\tools\makegdf.ps1 -Source build\Release\package -Image build\Multiplex360.gdf
+#   .\tools\makegdf.ps1 -Source build\Release\package -Image build\Jellyfin360.gdf
 param([Parameter(Mandatory)] [string]$Source, [Parameter(Mandatory)] [string]$Image)
 
 $ErrorActionPreference = 'Stop'

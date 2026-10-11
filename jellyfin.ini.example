@@ -1,0 +1,23 @@
+# Settings for Jellyfin 360. Copy to jellyfin.ini next to default.xex on the console
+# (tools\run.ps1 copies it for you). Lines starting with # are ignored.
+
+# Your Jellyfin server (required). http://<ip>:8096 on the home network, or an https
+# address if you reach it over the internet. No trailing slash.
+server=http://192.168.1.10:8096
+
+# Sign-in. Leave both empty to use Quick Connect: the console shows a 6-digit code that you
+# approve in any signed-in Jellyfin app (user menu > Quick Connect). Quick Connect must be
+# turned on in Dashboard > General. Or give a username and password here instead.
+#username=
+#password=
+
+# Playback (defaults shown). Direct play needs H.264/MPEG-4 at most 'directmax' tall and
+# at most 'directkbps'; anything else is converted by the server to 'quality' at 'kbps'.
+#threads=4
+#directmax=720
+#directkbps=8000
+#quality=720
+#kbps=4000
+
+# Debugging: send log lines to the PC running tools\loglisten.ps1
+#logto=192.168.1.20:5555

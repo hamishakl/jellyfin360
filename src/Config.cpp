@@ -41,9 +41,11 @@ void Config::Load( const char* path )
     std::map<std::string, std::string> v;
     if( !ReadIni( path, v ) )
         return;
-    if( !v["connection"].empty() )
-        connection = v["connection"];
-    serverName = v["servername"];
+    server = v["server"];
+    while( !server.empty() && server[server.size() - 1] == '/' )
+        server.erase( server.size() - 1 );
+    username = v["username"];
+    password = v["password"];
     autoplay = v["autoplay"];
     logTo = v["logto"];
     testSeek = atoi( v["testseek"].c_str() );
@@ -61,6 +63,8 @@ void Config::Load( const char* path )
         kbps = atoi( v["kbps"].c_str() );
     if( !v["directmax"].empty() )
         directMax = atoi( v["directmax"].c_str() );
+    if( !v["directkbps"].empty() )
+        directKbps = atoi( v["directkbps"].c_str() );
 }
 
 bool AuthStore::Load( const char* path )
@@ -68,8 +72,11 @@ bool AuthStore::Load( const char* path )
     std::map<std::string, std::string> v;
     if( !ReadIni( path, v ) )
         return false;
-    clientId = v["clientid"];
+    deviceId = v["deviceid"];
+    server = v["server"];
     token = v["token"];
+    userId = v["userid"];
+    username = v["username"];
     return true;
 }
 
@@ -78,8 +85,9 @@ bool AuthStore::Save( const char* path ) const
     FILE* f = fopen( path, "wb" );
     if( !f )
         return false;
-    fprintf( f, "# Plex sign-in for this console. Delete this file to sign out.\r\n" );
-    fprintf( f, "clientid=%s\r\ntoken=%s\r\n", clientId.c_str(), token.c_str() );
+    fprintf( f, "# Jellyfin sign-in for this console. Delete this file to sign out.\r\n" );
+    fprintf( f, "deviceid=%s\r\nserver=%s\r\ntoken=%s\r\nuserid=%s\r\nusername=%s\r\n", deviceId.c_str(),
+             server.c_str(), token.c_str(), userId.c_str(), username.c_str() );
     fclose( f );
     return true;
 }

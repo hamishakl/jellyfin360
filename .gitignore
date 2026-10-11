@@ -7,9 +7,9 @@ external/AtgFramework/Release/
 *.opensdf
 ipch/
 screenshots/
-plexlog.txt
-# Contains the Plex token
-plex.ini
+jellyfin360.log
+# Contains the server password, if used
+jellyfin.ini
 
 # FFmpeg library build output
 external/ffmpeg360/vcproj/**/Xbox 360/
