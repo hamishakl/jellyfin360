@@ -25,3 +25,6 @@ external/ffmpeg360/vcproj/**/Win32/
 *.pdb
 *.lastbuildstate
 *.cache
+
+# Mac test build + jftool session
+build/mac/

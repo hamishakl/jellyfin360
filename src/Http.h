@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <string>
+#include "Platform.h"   // __int64 off the console
 
 namespace Http
 {
