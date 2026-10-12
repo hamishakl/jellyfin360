@@ -13,7 +13,7 @@
 //   jftool media <itemId> [options]           the play decision, tracks, URLs
 //   jftool play <itemId> [options]            same, then opens the URL in mpv
 //   jftool watched <itemId> 0|1
-//     options: --transcode  --height N  --kbps N  --directmax N  --audio IDX  --sub IDX  --start SECONDS
+//     options: --transcode  --height N  --kbps N  --directmax N  --audio IDX  --sub IDX|off  --start SECONDS
 //   JFTOOL_VERBOSE=1 prints every request and reply.
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,7 +131,7 @@ namespace
             else if( a == "--kbps" )      { req.maxKbps = atoi( v ); ++i; }
             else if( a == "--directmax" ) { req.directMaxHeight = atoi( v ); ++i; }
             else if( a == "--audio" )     { req.audioIndex = atoi( v ); ++i; }
-            else if( a == "--sub" )       { req.subtitleIndex = atoi( v ); ++i; }
+            else if( a == "--sub" )       { req.subtitleIndex = strcmp( v, "off" ) == 0 ? Jellyfin::SUBS_OFF : atoi( v ); ++i; }
             else if( a == "--start" )     { req.startSeconds = atof( v ); ++i; }
         }
         return req;
@@ -145,6 +145,7 @@ int main( int argc, char** argv )
     std::string cmd = argv[1];
     std::string error, ip;
     Http::Startup( error, ip );
+    setvbuf( stdout, NULL, _IONBF, 0 );   // the Quick Connect code must show up before polling starts
 
     Session s;
     s.Load();

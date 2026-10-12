@@ -10,8 +10,10 @@ Jellyfin's API. The plain file player (`SimplePlayer.vcxproj`) is still here, un
 ## Status
 
 **Work in progress, not yet run on a console.** The Jellyfin side (sign-in, browsing, play
-decisions, progress reporting) is written and exercised natively on a Mac against a mock
-server (see *Testing without a console*); a run against a real Jellyfin is next. The console build has not been compiled yet;
+decisions, progress reporting) is written and verified natively on a Mac against a real
+Jellyfin 12.1 server and a mock one (see *Testing without a console*): Quick Connect, home rows,
+library/season/episode browsing, direct-play and transcode decisions, and the stream URLs
+themselves (checked with ffprobe). The console build has not been compiled yet;
 expect that step to shake out a few errors. Nothing here is affiliated with Jellyfin or Microsoft.
 
 ## What it does
@@ -25,8 +27,10 @@ expect that step to shake out a few errors. Nothing here is affiliated with Jell
   converted by your Jellyfin server to H.264 at a quality you choose, so the server's CPU or
   GPU does that work. The server makes the direct-play/transcode decision from a device profile
   the client sends (`/Items/{id}/PlaybackInfo`), the same way the official apps work.
-- Audio and subtitle track selection (subtitles are burned in by the server), quality presets,
-  resume, watched state, playback reporting.
+- Audio and subtitle track selection, quality presets, resume, watched state, playback
+  reporting. Subtitles are burned in by the server, so any subtitle (including one your Jellyfin
+  user preferences pick automatically, such as a forced track) means a transcode; choose
+  *Subtitles: Off* in the options menu to get direct play back.
 
 ## Install
 
@@ -99,8 +103,9 @@ XEX, though its networking is unreliable.
   not needed; an on-screen address entry for consoles without a keyboard.
 - Trickplay thumbnails while seeking (Jellyfin serves tiled sprite sheets).
 - Music, home videos and collections browse as folders only.
-- Direct play of files with embedded text subtitles without a transcode (the file player
-  already has a subtitle renderer).
+- Rendering subtitles on the console instead of burning them in. The server can already hand
+  text subtitles over separately (`External` delivery) and the file player has a renderer, so
+  direct play with subtitles is a matter of wiring the two together.
 
 ## Credits
 

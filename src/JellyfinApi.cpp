@@ -195,10 +195,27 @@ namespace
     }
 
     // What the console decodes itself, and what the server should convert to otherwise.
+    std::string SubtitleProfiles( const char* method )
+    {
+        static const char* const formats[] = { "srt", "subrip", "ass", "ssa", "vtt", "webvtt", "sub", "mov_text",
+                                               "pgssub", "pgs", "dvdsub", "dvbsub", 0 };
+        std::string out;
+        for( int i = 0; formats[i]; ++i )
+        {
+            if( i )
+                out += ',';
+            out += std::string( "{\"Format\":\"" ) + formats[i] + "\",\"Method\":\"" + method + "\"}";
+        }
+        return out;
+    }
+
     std::string DeviceProfile( const Jellyfin::PlayRequest& req, bool forTranscode )
     {
         int height = forTranscode ? req.maxHeight : req.directMaxHeight;
         int kbps = forTranscode ? req.maxKbps : ( req.directMaxKbps > req.maxKbps ? req.directMaxKbps : req.maxKbps );
+        // Encode = the server draws the subtitles into the picture (always a transcode). External =
+        // it hands them over separately and the video stays untouched; not rendered yet, so = off.
+        std::string subs = SubtitleProfiles( req.subtitleIndex == Jellyfin::SUBS_OFF ? "External" : "Encode" );
         char buf[2048];
         sprintf_s( buf,
             "{\"Name\":\"Xbox 360\","
@@ -215,13 +232,8 @@ namespace
               "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\",\"Value\":\"41\",\"IsRequired\":false}]},"
               "{\"Type\":\"Video\",\"Codec\":\"mpeg4\",\"Conditions\":["
               "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\",\"Value\":\"%d\",\"IsRequired\":true}]}],"
-            "\"SubtitleProfiles\":[{\"Format\":\"srt\",\"Method\":\"Encode\"},{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-              "{\"Format\":\"ass\",\"Method\":\"Encode\"},{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
-              "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},{\"Format\":\"pgs\",\"Method\":\"Encode\"},"
-              "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},{\"Format\":\"dvbsub\",\"Method\":\"Encode\"},"
-              "{\"Format\":\"vtt\",\"Method\":\"Encode\"},{\"Format\":\"sub\",\"Method\":\"Encode\"},"
-              "{\"Format\":\"mov_text\",\"Method\":\"Encode\"}]}",
-            kbps * 1000, kbps * 1000, height, kbps * 1000, height );
+            "\"SubtitleProfiles\":[%s]}",
+            kbps * 1000, kbps * 1000, height, kbps * 1000, height, subs.c_str() );
         return buf;
     }
 }
@@ -453,16 +465,21 @@ Jellyfin::Media Jellyfin::Client::GetMedia( const std::string& itemId, const Pla
     for( int pass = 0; pass < 2; ++pass )
     {
         char nums[256];
-        sprintf_s( nums, "\"StartTimeTicks\":%lld,\"MaxStreamingBitrate\":%d,\"SubtitleStreamIndex\":%d",
+        sprintf_s( nums, "\"StartTimeTicks\":%lld,\"MaxStreamingBitrate\":%d",
                    SecondsToTicks( req.startSeconds ),
-                   ( transcodeOnly ? req.maxKbps : ( req.directMaxKbps > req.maxKbps ? req.directMaxKbps : req.maxKbps ) ) * 1000,
-                   req.subtitleIndex );
+                   ( transcodeOnly ? req.maxKbps : ( req.directMaxKbps > req.maxKbps ? req.directMaxKbps : req.maxKbps ) ) * 1000 );
         std::string audio;
         if( req.audioIndex >= 0 )
         {
             char a[48];
             sprintf_s( a, ",\"AudioStreamIndex\":%d", req.audioIndex );
             audio = a;
+        }
+        if( req.subtitleIndex >= 0 )
+        {
+            char t[48];
+            sprintf_s( t, ",\"SubtitleStreamIndex\":%d", req.subtitleIndex );
+            audio += t;
         }
         std::string post = std::string( "{\"DeviceProfile\":" ) + DeviceProfile( req, transcodeOnly ) + "," + nums + audio +
                            ",\"UserId\":" + Json::Quote( m_userId ) +
@@ -504,8 +521,10 @@ Jellyfin::Media Jellyfin::Client::GetMedia( const std::string& itemId, const Pla
     int defaultSub = src["DefaultSubtitleStreamIndex"].Int( -1 );
     if( req.audioIndex >= 0 )
         defaultAudio = req.audioIndex;
-    if( req.subtitleIndex >= -1 )
+    if( req.subtitleIndex >= 0 )
         defaultSub = req.subtitleIndex;
+    else if( req.subtitleIndex == SUBS_OFF )
+        defaultSub = -1;        // delivered separately and not shown
 
     const Json::Value& streams = src["MediaStreams"];
     for( size_t i = 0; i < streams.Size(); ++i )

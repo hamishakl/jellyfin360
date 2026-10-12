@@ -707,7 +707,9 @@ Jellyfin::PlayRequest JellyfinApp::BuildRequest( double offset ) const
     const Jellyfin::Stream* a = m_playMedia.SelectedStream( 2 );
     const Jellyfin::Stream* st = m_playMedia.SelectedStream( 3 );
     r.audioIndex = a ? a->index : -1;
-    r.subtitleIndex = st ? st->index : -1;   // the server draws subtitles into the picture
+    // First ask: the server applies the user's subtitle preference (burned in). Once a track list
+    // exists and none is selected, the user turned them off (or the server picked none).
+    r.subtitleIndex = st ? st->index : ( m_playMedia.streams.empty() ? Jellyfin::SUBS_DEFAULT : Jellyfin::SUBS_OFF );
     return r;
 }
 

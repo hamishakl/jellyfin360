@@ -82,6 +82,11 @@ namespace Jellyfin
         Stream() : id( 0 ), streamType( 0 ), index( -1 ), channels( 0 ), selected( false ), external( false ) {}
     };
 
+    // Subtitle choices beyond a stream index. The server ignores "none" and applies the user's own
+    // subtitle preference (Jellyfin 12 picks forced/default tracks), so "off" is done by letting it
+    // deliver the track separately, which this client then doesn't show.
+    enum { SUBS_DEFAULT = -1, SUBS_OFF = -2 };
+
     // What is asked of the server for one play: tallest/heaviest direct play, transcode quality,
     // tracks, start point. Everything the server's decision depends on.
     struct PlayRequest
@@ -91,13 +96,13 @@ namespace Jellyfin
         int    maxHeight;         // transcode target
         int    maxKbps;           // transcode target bitrate
         int    audioIndex;        // -1 = server default
-        int    subtitleIndex;     // -1 = none
+        int    subtitleIndex;     // stream index, SUBS_DEFAULT or SUBS_OFF
         bool   allowDirectPlay;   // false forces a transcode (quality presets)
         bool   burnSubtitles;     // selected subtitles drawn into the picture (needs a transcode)
         double startSeconds;
 
         PlayRequest() : directMaxHeight( 720 ), directMaxKbps( 8000 ), maxHeight( 720 ), maxKbps( 4000 ),
-                        audioIndex( -1 ), subtitleIndex( -1 ), allowDirectPlay( true ), burnSubtitles( true ),
+                        audioIndex( -1 ), subtitleIndex( SUBS_DEFAULT ), allowDirectPlay( true ), burnSubtitles( true ),
                         startSeconds( 0 ) {}
     };
 
