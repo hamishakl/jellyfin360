@@ -1,0 +1,32 @@
+# Windows 10 x64 VM (KVM via dockur/windows) for the Xbox 360 XDK + VS2010 toolchain.
+# Console: http://homebox:8006 (noVNC), RDP to homebox:3389, or ssh -p 2222 ham@homebox.
+# Files dropped in ./shared appear in Windows as \\host.lan\Data.
+services:
+  windows:
+    image: dockurr/windows
+    container_name: win-xdk
+    environment:
+      VERSION: "10"          # Windows 10 Pro, downloaded from Microsoft
+      RAM_SIZE: "5G"
+      CPU_CORES: "4"
+      DISK_SIZE: "64G"
+      USERNAME: "ham"
+      PASSWORD: "changeme"
+      LANGUAGE: "English"
+      REGION: "en-NZ"
+      KEYBOARD: "en-US"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - 8006:8006
+      - 2222:22/tcp       # SSH into the Windows guest
+      - 3389:3389/tcp
+      - 3389:3389/udp
+    volumes:
+      - ./storage:/storage
+      - ./shared:/data
+    restart: unless-stopped
+    stop_grace_period: 2m
